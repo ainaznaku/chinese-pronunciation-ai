@@ -1,4 +1,4 @@
 streamlit
 SpeechRecognition
 pypinyin
-gTTS
+edge-tts
