@@ -1,3 +1,4 @@
 streamlit
 SpeechRecognition
 pypinyin
+gTTS
