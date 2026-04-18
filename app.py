@@ -1,5 +1,4 @@
 import os
-import re
 import tempfile
 from io import BytesIO
 
@@ -9,28 +8,98 @@ from pypinyin import pinyin, Style
 from gtts import gTTS
 
 
-st.set_page_config(page_title="汉语语音纠错智能体", page_icon="🎤", layout="centered")
-
-st.title("🎤 汉语语音纠错智能体 / Chinese Pronunciation Correction Assistant")
-st.write("支持两种方式：直接录音 / 上传音频文件")
-st.write("Supports two methods: record directly or upload an audio file")
+st.set_page_config(
+    page_title="汉语语音纠错智能体",
+    page_icon="🎤",
+    layout="centered"
+)
 
 # -----------------------------
-# Helpers
+# Style: Duolingo-like
 # -----------------------------
+st.markdown("""
+<style>
+.block-container {
+    padding-top: 1.2rem;
+    padding-bottom: 2rem;
+    max-width: 820px;
+}
+.main-title {
+    text-align: center;
+    font-size: 2.1rem;
+    font-weight: 800;
+    margin-bottom: 0.3rem;
+}
+.sub-title {
+    text-align: center;
+    font-size: 1rem;
+    color: #666;
+    margin-bottom: 1.2rem;
+}
+.duo-card {
+    background: white;
+    border-radius: 18px;
+    padding: 18px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    margin-bottom: 16px;
+    border: 1px solid #f0f0f0;
+}
+.score-box {
+    text-align: center;
+    padding: 20px;
+    border-radius: 20px;
+    background: #f7fff2;
+    border: 2px solid #d8f3c8;
+}
+.score-number {
+    font-size: 3rem;
+    font-weight: 900;
+    color: #58cc02;
+}
+.small-label {
+    font-size: 0.95rem;
+    color: #666;
+}
+.good-chip {
+    display: inline-block;
+    background: #e9fbe0;
+    color: #247a00;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    margin-top: 8px;
+}
+.bad-chip {
+    display: inline-block;
+    background: #ffe8e8;
+    color: #b42318;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+    margin-top: 8px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="main-title">🎤 汉语语音纠错智能体</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="sub-title">Russian + Chinese + English interface | Pinyin with tone marks | Score out of 100</div>',
+    unsafe_allow_html=True
+)
+
 INITIALS = [
     "zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l",
     "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w"
 ]
 
 
-def chinese_to_pinyin_with_tone(text: str):
-    result = pinyin(
-        text,
-        style=Style.TONE3,
-        strict=False,
-        neutral_tone_with_five=True
-    )
+def chinese_to_pinyin_marks(text: str):
+    result = pinyin(text, style=Style.TONE, strict=False)
+    return [item[0] for item in result]
+
+
+def chinese_to_pinyin_numbers(text: str):
+    result = pinyin(text, style=Style.TONE3, strict=False, neutral_tone_with_five=True)
     return [item[0] for item in result]
 
 
@@ -59,8 +128,9 @@ def compare_pinyin(std_list, user_list):
             results.append({
                 "index": i + 1,
                 "status": "extra",
-                "cn": f"第{i+1}个音节：学生多读了“{usr_py}”。",
-                "en": f"Syllable {i+1}: the student added an extra syllable “{usr_py}”."
+                "cn": f"学生多读了一个音节：{usr_py}",
+                "en": f"The student added an extra syllable: {usr_py}",
+                "deduction": 12
             })
             continue
 
@@ -68,8 +138,9 @@ def compare_pinyin(std_list, user_list):
             results.append({
                 "index": i + 1,
                 "status": "missing",
-                "cn": f"第{i+1}个音节：学生漏读了，标准应为“{std_py}”。",
-                "en": f"Syllable {i+1}: the student missed a syllable. The correct one should be “{std_py}”."
+                "cn": f"学生漏读了一个音节，标准应为：{std_py}",
+                "en": f"The student missed a syllable. The correct one is: {std_py}",
+                "deduction": 12
             })
             continue
 
@@ -84,86 +155,75 @@ def compare_pinyin(std_list, user_list):
                 "index": i + 1,
                 "status": "correct",
                 "cn": f"第{i+1}个音节正确：{std_py}",
-                "en": f"Syllable {i+1} is correct: {std_py}"
+                "en": f"Syllable {i+1} is correct: {std_py}",
+                "deduction": 0
             })
             continue
 
         details_cn = []
         details_en = []
+        deduction = 0
 
         if std_ini != usr_ini:
             details_cn.append(f"声母错误：应为“{std_ini}”，实际更接近“{usr_ini}”")
-            details_en.append(f"Initial consonant error: expected “{std_ini}”, but got something closer to “{usr_ini}”")
+            details_en.append(f"Initial error: expected “{std_ini}”, but heard something closer to “{usr_ini}”")
+            deduction += 20
 
         if std_fin != usr_fin:
             details_cn.append(f"韵母错误：应为“{std_fin}”，实际更接近“{usr_fin}”")
-            details_en.append(f"Final error: expected “{std_fin}”, but got something closer to “{usr_fin}”")
+            details_en.append(f"Final error: expected “{std_fin}”, but heard something closer to “{usr_fin}”")
+            deduction += 20
 
         if std_tone != usr_tone:
             details_cn.append(f"声调错误：应为第{std_tone}声，实际更接近第{usr_tone}声")
             details_en.append(f"Tone error: expected tone {std_tone}, but it sounds closer to tone {usr_tone}")
+            deduction += 15
 
         if not details_cn:
             details_cn.append(f"发音有偏差：标准“{std_py}”，学生“{usr_py}”")
             details_en.append(f"Pronunciation deviation: target “{std_py}”, student produced “{usr_py}”")
+            deduction += 15
 
         results.append({
             "index": i + 1,
             "status": "incorrect",
             "target": std_py,
             "user": usr_py,
-            "cn": f"第{i+1}个音节有误。标准：{std_py}；学生：{usr_py}。\n" + "；".join(details_cn),
-            "en": f"Syllable {i+1} is incorrect. Target: {std_py}; Student: {usr_py}.\n" + "; ".join(details_en)
+            "cn": "；".join(details_cn),
+            "en": "; ".join(details_en),
+            "deduction": deduction
         })
 
     return results
 
 
-def build_general_feedback(results):
-    tone_err = 0
-    initial_err = 0
-    final_err = 0
-    other_err = 0
-
+def calculate_score(results):
+    score = 100
     for r in results:
-        if r["status"] != "incorrect":
-            continue
-        cn = r["cn"]
-        if "声调错误" in cn:
-            tone_err += 1
-        if "声母错误" in cn:
-            initial_err += 1
-        if "韵母错误" in cn:
-            final_err += 1
-        if all(key not in cn for key in ["声调错误", "声母错误", "韵母错误"]):
-            other_err += 1
+        score -= r.get("deduction", 0)
+    return max(0, min(100, score))
 
-    if tone_err == 0 and initial_err == 0 and final_err == 0 and other_err == 0:
-        return {
-            "cn": "整体发音很好。可以继续练习更长的句子，并注意语流自然度。",
-            "en": "Overall pronunciation is good. You can move on to longer sentences and work on natural fluency."
-        }
 
-    parts_cn = []
-    parts_en = []
-
-    if tone_err:
-        parts_cn.append("请重点练习声调，尤其注意升降变化。")
-        parts_en.append("Please focus on tones, especially the rising and falling contour.")
-    if initial_err:
-        parts_cn.append("请注意声母发音部位，例如舌尖音、舌面音和送气对比。")
-        parts_en.append("Please pay attention to initials, such as tongue position and aspirated vs. unaspirated sounds.")
-    if final_err:
-        parts_cn.append("请注意韵母口型和收音位置。")
-        parts_en.append("Please pay attention to finals, including mouth shape and ending position.")
-    if other_err:
-        parts_cn.append("建议慢速跟读，一音节一音节地纠正。")
-        parts_en.append("It is recommended to shadow slowly and correct pronunciation syllable by syllable.")
-
-    return {
-        "cn": " ".join(parts_cn),
-        "en": " ".join(parts_en)
-    }
+def score_comment(score):
+    if score >= 90:
+        return (
+            "发音非常好，接近标准。",
+            "Excellent pronunciation, very close to the standard."
+        )
+    if score >= 75:
+        return (
+            "整体不错，还有一些小问题需要练习。",
+            "Good overall, but there are still some points to improve."
+        )
+    if score >= 60:
+        return (
+            "基础可以，需要重点练习声调和音节。",
+            "The foundation is okay, but tones and syllables need more practice."
+        )
+    return (
+        "需要继续练习。建议放慢速度，一音节一音节模仿。",
+        "More practice is needed. Try slowing down and imitating one syllable at a time."
+    )
 
 
 def synthesize_standard_audio(text: str):
@@ -181,11 +241,10 @@ def recognize_audio_file(path: str):
     recognizer = sr.Recognizer()
     with sr.AudioFile(path) as source:
         audio = recognizer.record(source)
-    text = recognizer.recognize_google(audio, language="zh-CN")
-    return text
+    return recognizer.recognize_google(audio, language="zh-CN")
 
 
-def save_uploaded_or_recorded_audio_to_temp(uploaded_file):
+def save_audio_to_temp(uploaded_file):
     suffix = ".wav"
     file_name = getattr(uploaded_file, "name", "")
     if "." in file_name:
@@ -199,78 +258,103 @@ def save_uploaded_or_recorded_audio_to_temp(uploaded_file):
 # -----------------------------
 # UI
 # -----------------------------
-standard_text = st.text_input(
-    "标准句子 / Target sentence",
-    value="你好"
-)
+with st.container():
+    st.markdown('<div class="duo-card">', unsafe_allow_html=True)
+    standard_text = st.text_input(
+        "标准句子 / Target sentence / Эталонная фраза",
+        value="你好"
+    )
 
-st.markdown("### 选择输入方式 / Choose input method")
-mode = st.radio(
-    "方式 / Method",
-    ["🎙️ 直接录音 Record now", "📁 上传音频 Upload audio"],
-    label_visibility="collapsed"
-)
+    mode = st.radio(
+        "选择方式 / Choose method / Выберите способ",
+        ["🎙️ 直接录音 Record now", "📁 上传音频 Upload audio"],
+        horizontal=True
+    )
+    st.markdown('</div>', unsafe_allow_html=True)
 
 audio_path = None
 
-if mode == "🎙️ 直接录音 Record now":
-    audio_rec = st.audio_input("点击录音 / Click to record")
-    if audio_rec is not None:
-        audio_path = save_uploaded_or_recorded_audio_to_temp(audio_rec)
-        st.audio(audio_path)
+with st.container():
+    st.markdown('<div class="duo-card">', unsafe_allow_html=True)
+    if mode == "🎙️ 直接录音 Record now":
+        audio_rec = st.audio_input("点击录音 / Click to record / Нажмите для записи")
+        if audio_rec is not None:
+            audio_path = save_audio_to_temp(audio_rec)
+            st.audio(audio_path)
+    else:
+        uploaded = st.file_uploader(
+            "上传音频 / Upload audio / Загрузите аудио",
+            type=["wav", "mp3", "m4a", "ogg"]
+        )
+        if uploaded is not None:
+            audio_path = save_audio_to_temp(uploaded)
+            st.audio(audio_path)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-else:
-    uploaded = st.file_uploader(
-        "上传音频文件 / Upload an audio file",
-        type=["wav", "mp3", "m4a", "ogg"]
-    )
-    if uploaded is not None:
-        audio_path = save_uploaded_or_recorded_audio_to_temp(uploaded)
-        st.audio(audio_path)
-
-if st.button("开始分析 / Start analysis"):
+if st.button("开始分析 / Start analysis / Начать анализ", use_container_width=True):
     if not standard_text.strip():
-        st.warning("请输入标准句子 / Please enter the target sentence.")
+        st.warning("请输入标准句子 / Please enter the target sentence / Введите эталонную фразу")
     elif not audio_path:
-        st.warning("请先录音或上传音频 / Please record or upload audio first.")
+        st.warning("请先录音或上传音频 / Please record or upload audio first / Сначала запишите или загрузите аудио")
     else:
         try:
             recognized_text = recognize_audio_file(audio_path)
 
-            st.markdown("## 识别结果 / Recognition result")
+            std_pinyin_marks = chinese_to_pinyin_marks(standard_text)
+            usr_pinyin_marks = chinese_to_pinyin_marks(recognized_text)
+
+            std_pinyin_nums = chinese_to_pinyin_numbers(standard_text)
+            usr_pinyin_nums = chinese_to_pinyin_numbers(recognized_text)
+
+            results = compare_pinyin(std_pinyin_nums, usr_pinyin_nums)
+            score = calculate_score(results)
+            cn_comment, en_comment = score_comment(score)
+
+            st.markdown('<div class="duo-card score-box">', unsafe_allow_html=True)
+            st.markdown(f'<div class="score-number">{score}/100</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="small-label">中文：{cn_comment}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="small-label">English: {en_comment}</div>', unsafe_allow_html=True)
+            st.progress(score / 100)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            st.markdown('<div class="duo-card">', unsafe_allow_html=True)
+            st.subheader("识别结果 / Recognition / Что сказано")
             st.write(f"**中文 Chinese:** {recognized_text}")
+            st.write(f"**标准拼音 Target pinyin:** {' '.join(std_pinyin_marks)}")
+            st.write(f"**你的拼音 Your pinyin:** {' '.join(usr_pinyin_marks)}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            std_pinyin = chinese_to_pinyin_with_tone(standard_text)
-            usr_pinyin = chinese_to_pinyin_with_tone(recognized_text)
-
-            st.markdown("## 对比结果 / Comparison")
-            st.write(f"**标准拼音 Target pinyin:** {std_pinyin}")
-            st.write(f"**学生拼音 Student pinyin:** {usr_pinyin}")
-
-            results = compare_pinyin(std_pinyin, usr_pinyin)
-
-            st.markdown("## 纠错说明 / Correction details")
+            st.markdown('<div class="duo-card">', unsafe_allow_html=True)
+            st.subheader("逐项纠错 / Corrections / Исправления")
             for r in results:
                 if r["status"] == "correct":
+                    st.markdown(
+                        f"""
+                        <div class="good-chip">Correct</div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                     st.success(f"中文：{r['cn']}\n\nEnglish: {r['en']}")
                 else:
+                    st.markdown(
+                        f"""
+                        <div class="bad-chip">Needs practice</div>
+                        """,
+                        unsafe_allow_html=True
+                    )
                     st.error(f"中文：{r['cn']}\n\nEnglish: {r['en']}")
+            st.markdown('</div>', unsafe_allow_html=True)
 
-            feedback = build_general_feedback(results)
-
-            st.markdown("## 总结建议 / Overall feedback")
-            st.info(f"中文：{feedback['cn']}\n\nEnglish: {feedback['en']}")
-
-            st.markdown("## 正确答案 / Correct answer")
+            st.markdown('<div class="duo-card">', unsafe_allow_html=True)
+            st.subheader("正确答案 / Correct answer / Правильный ответ")
             st.write(f"**中文 Chinese:** {standard_text}")
-            st.write(f"**拼音 Pinyin:** {' '.join(std_pinyin)}")
-
-            st.markdown("## 标准发音 / Standard pronunciation")
+            st.write(f"**拼音 Pinyin:** {' '.join(std_pinyin_marks)}")
             tts_audio = synthesize_standard_audio(standard_text)
             if tts_audio is not None:
                 st.audio(tts_audio, format="audio/mp3")
             else:
-                st.warning("标准语音暂时无法生成，但文字和拼音已经显示。 / Standard audio could not be generated right now, but the text and pinyin are shown.")
+                st.info("标准发音暂时无法生成 / Standard audio is unavailable right now")
+            st.markdown('</div>', unsafe_allow_html=True)
 
         except sr.UnknownValueError:
             st.error("无法识别语音。请说得更清楚一些。 / Speech could not be recognized. Please speak more clearly.")
