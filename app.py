@@ -13,7 +13,6 @@ st.set_page_config(
     layout="centered"
 )
 
-# ---------- Style ----------
 st.markdown("""
 <style>
 .block-container {
@@ -75,7 +74,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ---------- Lesson List ----------
 LESSONS = [
     "你好",
     "谢谢",
@@ -138,29 +136,23 @@ LESSONS = [
     "晚上好"
 ]
 
-# ---------- Session State ----------
-if "current_index" not in st.session_state:
-    st.session_state.current_index = 0
-
-if "last_score" not in st.session_state:
-    st.session_state.last_score = None
-
-if "last_spoken" not in st.session_state:
-    st.session_state.last_spoken = ""
-
-if "last_results" not in st.session_state:
-    st.session_state.last_results = []
-
-if "analysis_done" not in st.session_state:
-    st.session_state.analysis_done = False
-
-target = LESSONS[st.session_state.current_index]
-
-# ---------- Helpers ----------
 INITIALS = [
     "zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l",
     "g", "k", "h", "j", "q", "x", "r", "z", "c", "s", "y", "w"
 ]
+
+if "current_index" not in st.session_state:
+    st.session_state.current_index = 0
+if "last_score" not in st.session_state:
+    st.session_state.last_score = None
+if "last_spoken" not in st.session_state:
+    st.session_state.last_spoken = ""
+if "last_results" not in st.session_state:
+    st.session_state.last_results = []
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
+
+target = LESSONS[st.session_state.current_index]
 
 
 def pinyin_marks(text: str):
@@ -189,7 +181,7 @@ def split_initial_final(base: str):
     return "", base
 
 
-def compare(std_list, user_list):
+def compare(std_list, user_list, std_marks, user_marks):
     results = []
     score = 100
     max_len = max(len(std_list), len(user_list))
@@ -197,13 +189,15 @@ def compare(std_list, user_list):
     for i in range(max_len):
         std = std_list[i] if i < len(std_list) else None
         usr = user_list[i] if i < len(user_list) else None
+        std_mark = std_marks[i] if i < len(std_marks) else ""
+        usr_mark = user_marks[i] if i < len(user_marks) else ""
 
         if std is None:
             score -= 12
             results.append({
                 "ok": False,
-                "cn": f"第{i+1}个音节多读了：{usr}",
-                "en": f"Syllable {i+1}: extra syllable {usr}"
+                "cn": f"第{i+1}个音节多读了：{usr_mark or usr}",
+                "en": f"Syllable {i+1}: extra syllable {usr_mark or usr}"
             })
             continue
 
@@ -211,8 +205,8 @@ def compare(std_list, user_list):
             score -= 12
             results.append({
                 "ok": False,
-                "cn": f"第{i+1}个音节漏读了，应该是：{std}",
-                "en": f"Syllable {i+1}: missing syllable, it should be: {std}"
+                "cn": f"第{i+1}个音节漏读了，应该是：{std_mark or std}",
+                "en": f"Syllable {i+1}: missing syllable, it should be: {std_mark or std}"
             })
             continue
 
@@ -225,8 +219,8 @@ def compare(std_list, user_list):
         if std == usr:
             results.append({
                 "ok": True,
-                "cn": f"第{i+1}个音节正确：{std}",
-                "en": f"Syllable {i+1} correct: {std}"
+                "cn": f"第{i+1}个音节正确：{std_mark}",
+                "en": f"Syllable {i+1} correct: {std_mark}"
             })
         else:
             msg_cn = []
@@ -248,8 +242,8 @@ def compare(std_list, user_list):
                 score -= 15
 
             if not msg_cn:
-                msg_cn.append(f"发音不够准确，标准是 {std}，你读成了 {usr}")
-                msg_en.append(f"Pronunciation is not accurate. Target is {std}, but you said {usr}")
+                msg_cn.append(f"发音不够准确，标准是 {std_mark}，你读成了 {usr_mark}")
+                msg_en.append(f"Pronunciation is not accurate. Target is {std_mark}, but you said {usr_mark}")
                 score -= 10
 
             results.append({
@@ -280,7 +274,11 @@ def create_standard_audio(text: str):
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
     temp.close()
     asyncio.run(generate_voice(text, temp.name))
-    return temp.name
+
+    with open(temp.name, "rb") as f:
+        audio_bytes = f.read()
+
+    return audio_bytes
 
 
 def save_audio(file):
@@ -322,7 +320,10 @@ def reset_result_state():
     st.session_state.analysis_done = False
 
 
-# ---------- Top Navigation ----------
+progress_value = (st.session_state.current_index + 1) / len(LESSONS)
+st.progress(progress_value)
+st.caption(f"Progress: {st.session_state.current_index + 1} / {len(LESSONS)}")
+
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -345,7 +346,6 @@ with col3:
             reset_result_state()
             st.rerun()
 
-# ---------- Task Card ----------
 st.markdown(
     f"""
     <div class="card">
@@ -360,7 +360,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ---------- Audio Input ----------
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.markdown('<div class="section-title">选择方式 / Choose Method / Выберите способ</div>', unsafe_allow_html=True)
 
@@ -389,7 +388,6 @@ else:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ---------- Analyze ----------
 if st.button("开始分析 / Analyze", use_container_width=True):
     if not audio_path:
         st.warning("请先录音或上传音频 / Please record or upload audio first")
@@ -400,7 +398,10 @@ if st.button("开始分析 / Analyze", use_container_width=True):
             target_nums = pinyin_numbers(target)
             spoken_nums = pinyin_numbers(spoken)
 
-            score, results = compare(target_nums, spoken_nums)
+            target_marks = pinyin_marks(target)
+            spoken_marks = pinyin_marks(spoken)
+
+            score, results = compare(target_nums, spoken_nums, target_marks, spoken_marks)
 
             st.session_state.last_score = score
             st.session_state.last_spoken = spoken
@@ -414,7 +415,6 @@ if st.button("开始分析 / Analyze", use_container_width=True):
         except Exception as e:
             st.error(f"Error: {e}")
 
-# ---------- Show Result ----------
 if st.session_state.analysis_done:
     target_marks = pinyin_marks(target)
     spoken_marks = pinyin_marks(st.session_state.last_spoken)
@@ -460,8 +460,8 @@ if st.session_state.analysis_done:
     st.write(f"**中文:** {target}")
     st.write(f"**拼音:** {' '.join(target_marks)}")
 
-    voice_file = create_standard_audio(target)
-    st.audio(voice_file, format="audio/mp3")
+    voice_bytes = create_standard_audio(target)
+    st.audio(voice_bytes, format="audio/mp3")
     st.markdown('</div>', unsafe_allow_html=True)
 
     if st.session_state.current_index < len(LESSONS) - 1:
