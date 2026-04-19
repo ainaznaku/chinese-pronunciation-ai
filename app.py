@@ -1,4 +1,5 @@
 import os
+import base64
 import tempfile
 import asyncio
 
@@ -64,6 +65,10 @@ st.markdown("""
     font-size: 1.2rem;
     font-weight: 700;
     margin-bottom: 0.6rem;
+}
+audio {
+    width: 100%;
+    margin-top: 10px;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -270,15 +275,24 @@ async def generate_voice(text: str, path: str):
     await communicate.save(path)
 
 
-def create_standard_audio(text: str):
+def create_standard_audio_bytes(text: str):
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
     temp.close()
     asyncio.run(generate_voice(text, temp.name))
-
     with open(temp.name, "rb") as f:
-        audio_bytes = f.read()
+        data = f.read()
+    return data
 
-    return audio_bytes
+
+def render_audio_player(audio_bytes: bytes):
+    audio_base64 = base64.b64encode(audio_bytes).decode("utf-8")
+    audio_html = f"""
+        <audio controls>
+            <source src="data:audio/mp3;base64,{audio_base64}" type="audio/mpeg">
+            Your browser does not support audio playback.
+        </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
 
 
 def save_audio(file):
@@ -376,7 +390,6 @@ if mode == "🎙️ Record voice":
     audio_data = st.audio_input("点击录音 / Record your pronunciation")
     if audio_data:
         audio_path = save_audio(audio_data)
-        st.audio(audio_path)
 else:
     uploaded = st.file_uploader(
         "Upload audio file",
@@ -384,7 +397,6 @@ else:
     )
     if uploaded:
         audio_path = save_audio(uploaded)
-        st.audio(audio_path)
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -460,8 +472,12 @@ if st.session_state.analysis_done:
     st.write(f"**中文:** {target}")
     st.write(f"**拼音:** {' '.join(target_marks)}")
 
-    voice_bytes = create_standard_audio(target)
-    st.audio(voice_bytes, format="audio/mp3")
+    try:
+        voice_bytes = create_standard_audio_bytes(target)
+        render_audio_player(voice_bytes)
+    except Exception as e:
+        st.warning(f"标准发音暂时不可用 / Standard audio unavailable: {e}")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
     if st.session_state.current_index < len(LESSONS) - 1:
